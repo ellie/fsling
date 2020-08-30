@@ -1,32 +1,36 @@
 use std::error::Error;
 
 use clap::clap_app;
-use notify::DebouncedEvent;
 
-mod filewatcher;
+mod file_watcher;
+mod event_handler;
 
-use filewatcher::FileWatcher;
-
-fn event_handler(event: DebouncedEvent) {
-    println!("{:?}", event);
-}
+use file_watcher::{FileWatcher, FileEventHandler};
+use event_handler::EventHandler;
 
 fn main() -> Result<(), Box<dyn Error>>{
     let matches = clap_app!(fsling =>
         (version: "0.0.1")
         (author: "Ellie Huxtable <e@elm.sh>")
         (about: "fsling - File Sling")
-        (@arg config: -c --config +takes_value "Sets a custom config file")
+
+        (@arg exclude: -e --exclude +takes_value +multiple "Regex for paths to ignore")
+
         (@arg path: +required "Set the directory to watch")
     )
     .get_matches();
 
+
+
     // Safe to unwrap as this is required above
     let p = matches.value_of("path").unwrap();
 
-    let mut watcher = FileWatcher::new(p)?;
+    let excludes = matches.values_of("exclude");
 
-    watcher.watch_files(event_handler)?;
+    let mut watcher = FileWatcher::new(p)?;
+    let handler = EventHandler::new(excludes).unwrap();
+
+    watcher.watch_files(handler)?;
 
     Ok(())
 }

@@ -2,6 +2,10 @@ use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Result, Watcher}
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
+pub trait FileEventHandler{
+    fn handle(&self, event: DebouncedEvent);
+}
+
 pub struct FileWatcher {
     path: String,
     watcher: RecommendedWatcher,
@@ -11,7 +15,7 @@ pub struct FileWatcher {
 impl FileWatcher {
     pub fn new(path: &str) -> Result<FileWatcher> {
         let (tx, rx) = channel();
-        let watcher: RecommendedWatcher = Watcher::new(tx, Duration::from_secs(2))?;
+        let watcher: RecommendedWatcher = Watcher::new(tx, Duration::from_millis(250))?;
 
         Ok(FileWatcher {
             path: path.to_string(),
@@ -22,14 +26,14 @@ impl FileWatcher {
 
     pub fn watch_files(
         &mut self,
-        event_handler: impl Fn(DebouncedEvent),
+        event_handler: impl FileEventHandler,
     ) -> Result<()> {
         self.watcher
             .watch(self.path.as_str(), RecursiveMode::Recursive)?;
 
         loop {
             match self.rx.recv() {
-                Ok(event) => event_handler(event),
+                Ok(event) => event_handler.handle(event),
                 Err(e) => println!("watch error: {:?}", e),
             }
         }
