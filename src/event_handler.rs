@@ -1,41 +1,56 @@
 use std::env;
-use std::error::Error;
 use std::fs;
 use std::fs::File;
-use std::io;
-use std::io::prelude::*;
 use std::io::prelude::*;
 use std::net::TcpStream;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Result, Error};
 use clap::Values;
 use globset::{Glob, GlobMatcher};
 use notify::DebouncedEvent;
-use regex::Regex;
 use ssh2::Session;
 
 pub struct EventHandler {
+    remote: String,
     session: Session,
     globs: Vec<GlobMatcher>,
 }
+// Take a string such as my.host:22:/home/me/src, and return
+// (my.host:22, /home/me/src)
+fn parse_host(host: &str) -> Result<(String, String)> {
+    let parts: Vec<&str> = host.split(":").collect();
+
+    match parts[..] {
+        [hostname, path] => Ok((format!("{}:22", hostname), path.to_string())),
+        [hostname, port, path] => Ok((format!("{}:{}", hostname, port), path.to_string())),
+        _ => Err(Error::msg("Failed to parse host input"))
+    }
+}
 
 impl EventHandler {
-    pub fn new(excludes: Option<Values>) -> Option<EventHandler> {
+    pub fn new(host: &str, excludes: Option<Values>) -> Result<EventHandler> {
         let globs: Vec<GlobMatcher> = excludes
             .unwrap_or(Values::default())
             .map(|v| Glob::new(v).unwrap().compile_matcher())
             .collect();
 
-        let tcp = TcpStream::connect("ellie.tv:22").unwrap();
+        let (host, remote) = parse_host(host)?;
+
+        let tcp = TcpStream::connect(host).unwrap();
         let mut session = Session::new().unwrap();
 
         session.set_tcp_stream(tcp);
         session.handshake().unwrap();
         session.userauth_agent("ellie").unwrap();
 
-        Some(EventHandler { session, globs })
+        Ok(EventHandler {
+            remote,
+            session,
+            globs,
+        })
     }
+
 
     fn ignore(&self, path: &str) -> bool {
         self.globs.iter().map(|g| g.is_match(path)).any(|x| x)
@@ -81,7 +96,7 @@ impl crate::FileEventHandler for EventHandler {
         }
 
         let mut code = PathBuf::new();
-        code.push("/home/ellie/src");
+        code.push(&self.remote);
         code.push(path);
 
         println!("sending: {:?}", code);
