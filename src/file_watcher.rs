@@ -1,9 +1,13 @@
-use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Result, Watcher};
+use std::error::Error;
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
+use anyhow::Result;
+
+use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
+
 pub trait FileEventHandler{
-    fn handle(&self, event: DebouncedEvent);
+    fn handle(&self, event: DebouncedEvent) -> Result<()>;
 }
 
 pub struct FileWatcher {
@@ -33,8 +37,8 @@ impl FileWatcher {
 
         loop {
             match self.rx.recv() {
-                Ok(event) => event_handler.handle(event),
-                Err(e) => println!("watch error: {:?}", e),
+                Ok(event) => event_handler.handle(event)?,
+                Err(e) => {},
             }
         }
     }
