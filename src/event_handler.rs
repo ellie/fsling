@@ -1,16 +1,19 @@
 use std::env;
 use std::error::Error;
 use std::fs;
+use std::fs::File;
+use std::io;
+use std::io::prelude::*;
 use std::io::prelude::*;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::Values;
+use globset::{Glob, GlobMatcher};
 use notify::DebouncedEvent;
 use regex::Regex;
 use ssh2::Session;
-use globset::{Glob, GlobMatcher};
 
 pub struct EventHandler {
     session: Session,
@@ -19,11 +22,10 @@ pub struct EventHandler {
 
 impl EventHandler {
     pub fn new(excludes: Option<Values>) -> Option<EventHandler> {
-        let globs: Vec<GlobMatcher> = excludes.unwrap_or(Values::default())
-                    .map(|v|{
-                        Glob::new(v).unwrap().compile_matcher()
-                    })
-                    .collect();
+        let globs: Vec<GlobMatcher> = excludes
+            .unwrap_or(Values::default())
+            .map(|v| Glob::new(v).unwrap().compile_matcher())
+            .collect();
 
         let tcp = TcpStream::connect("ellie.tv:22").unwrap();
         let mut session = Session::new().unwrap();
@@ -36,7 +38,15 @@ impl EventHandler {
     }
 
     fn ignore(&self, path: &str) -> bool {
-        self.globs.iter().map(|g| g.is_match(path)).any(|x|x)
+        self.globs.iter().map(|g| g.is_match(path)).any(|x| x)
+    }
+
+    // Take a local filepath, and write the contents to the remote
+    fn send_file(&self, source: &mut dyn Read, dest: &mut dyn Write) -> Result<()> {
+        std::io::copy(source, dest)?;
+        dest.flush()?;
+
+        Ok(())
     }
 }
 
@@ -57,8 +67,6 @@ impl crate::FileEventHandler for EventHandler {
             Err(_) => path,
         };
 
-        let current = env::current_dir().unwrap();
-
         let path = path.strip_prefix(env::current_dir()?)?;
         let path = path.to_str().unwrap();
 
@@ -78,11 +86,14 @@ impl crate::FileEventHandler for EventHandler {
 
         println!("sending: {:?}", code);
 
+        let mut source = File::open(path)?;
+
         let mut remote_file = self
             .session
-            .scp_send(code.as_path(), 0o644, 10, None)
+            .scp_send(code.as_path(), 0o644, source.metadata()?.len(), None)
             .unwrap();
-        remote_file.write(b"1234567890").unwrap();
+
+        self.send_file(&mut source, &mut remote_file)?;
 
         Ok(())
     }
